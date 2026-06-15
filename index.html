@@ -362,7 +362,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--theme-bg,#
       </div>
 
       <div style="background:#FFF5E0;border:1px solid #EFD080;border-radius:8px;padding:10px 12px;font-size:12px;color:#854F0B;line-height:1.7;margin-bottom:10px;">
-        <strong>How it works:</strong> After connecting, click <strong>"Add to Calendar"</strong> on any task card to push it as a Google Calendar event. Tasks are created with a <strong>✓ Task:</strong> prefix. The deadline date and start time are used for the event. If an event already exists on that date, it will be skipped (no duplicates). Editing a task and re-syncing will update the existing event.
+        <strong>How it works:</strong> After connecting, each task card shows two Calendar buttons — <strong>Deadline</strong> (pushes the deadline date as one event) and <strong>Work Days</strong> (pushes each scheduled work day as a separate all-day or timed event). Both use duplicate checking so no repeats are created. Editing a task and re-syncing will update the existing deadline event.
       </div>
 
       <div style="font-size:11px;color:#999;line-height:1.6;">
@@ -713,6 +713,70 @@ async function pushToGCal(entry){
   }catch(e){ showToast('Could not reach Google Calendar.'); }
 }
 
+async function pushWorkDaysToGCal(taskId){
+  const t = tasks.find(x=>x.id===taskId);
+  if(!t){ showToast('Task not found.'); return; }
+  if(!gcalToken){ showToast('Connect Google Calendar first.'); return; }
+  if(!t.workDays||!t.workDays.length){ showToast('No scheduled work days on this task.'); return; }
+
+  let added=0, skipped=0, failed=0;
+  showToast(`Syncing ${t.workDays.length} work day(s)…`, 8000);
+
+  for(const wd of t.workDays){
+    try{
+      // Duplicate check for this specific day
+      const dayStart = wd+'T00:00:00Z';
+      const dayEnd   = wd+'T23:59:59Z';
+      const listRes  = await fetch(
+        `https://www.googleapis.com/calendar/v3/calendars/primary/events?timeMin=${dayStart}&timeMax=${dayEnd}&singleEvents=true`,
+        {headers:{Authorization:`Bearer ${gcalToken}`}}
+      );
+      if(listRes.ok){
+        const listData = await listRes.json();
+        const titleToCheck = '✓ Task: '+t.name;
+        const dup = (listData.items||[]).find(ev=>ev.summary===titleToCheck);
+        if(dup){ skipped++; continue; }
+      }
+      // Build event for this work day — use task start/end time, all-day fallback
+      const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+      let start, end;
+      if(t.startTime && t.endTime){
+        start = {dateTime:`${wd}T${t.startTime}:00`, timeZone:tz};
+        end   = {dateTime:`${wd}T${t.endTime}:00`,   timeZone:tz};
+      } else {
+        start = {date:wd};
+        end   = {date:wd};
+      }
+      const desc = [
+        t.project   ? 'Project: '+t.project     : '',
+        t.country   ? 'Country: '+t.country     : '',
+        t.assignedTo? 'Assigned to: '+t.assignedTo : '',
+        t.detail    ? t.detail.replace(/<[^>]*>/g,'').replace(/\s+/g,' ').trim().slice(0,200) : ''
+      ].filter(Boolean).join(' | ');
+      const eventBody = {
+        summary:     '✓ Task: '+t.name,
+        description: desc,
+        start, end,
+        colorId: '2' // sage green for tasks
+      };
+      const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
+        method:'POST',
+        headers:{Authorization:`Bearer ${gcalToken}`,'Content-Type':'application/json'},
+        body:JSON.stringify(eventBody)
+      });
+      if(res.ok) added++;
+      else failed++;
+    }catch{ failed++; }
+  }
+
+  // Summary toast
+  const parts = [];
+  if(added)   parts.push(`${added} added`);
+  if(skipped) parts.push(`${skipped} already existed`);
+  if(failed)  parts.push(`${failed} failed`);
+  showToast(`Work days synced — ${parts.join(', ')}.`, 4000);
+}
+
 async function patchGCal(entry){
   if(!gcalToken||!entry?.gcalEventId) return;
   try{
@@ -956,9 +1020,10 @@ function buildCard(t){
   const div=document.createElement('div');
   div.className=`task-card${done?' tc-done':''}${cancelled?' tc-cancel':''}`;
   const det=(t.detail&&t.detail.replace(/<[^>]*>/g,'').trim())?`<div class="card-detail-text">${t.detail}</div>`:'';
-  const gcalBtn = gcalToken
-    ? `<button class="cbtn cbtn-gcal" onclick="pushToGCal(taskToEntry(tasks.find(x=>x.id===${t.id})))"><i class="fa-brands fa-google"></i> Add to Calendar</button>`
-    : `<button class="cbtn cbtn-gcal" onclick="switchPage('config');showToast('Connect Google Calendar in Configure first.')" style="opacity:.6;"><i class="fa-brands fa-google"></i> Add to Calendar</button>`;
+  const gcalBtns = gcalToken ? `
+    <button class="cbtn cbtn-gcal" onclick="pushToGCal(taskToEntry(tasks.find(x=>x.id===${t.id})))"><i class="fa-brands fa-google"></i> Deadline</button>
+    ${t.workDays&&t.workDays.length ? `<button class="cbtn cbtn-gcal" onclick="pushWorkDaysToGCal(${t.id})"><i class="fa-regular fa-calendar-days"></i> Work Days (${t.workDays.length})</button>` : ''}
+  ` : `<button class="cbtn cbtn-gcal" onclick="switchPage('config');showToast('Connect Google Calendar in Configure first.')" style="opacity:.6;"><i class="fa-brands fa-google"></i> Add to Calendar</button>`;
   div.innerHTML=`
     <div class="card-stripe-body">
       <div class="priority-stripe" style="background:${PRI_STRIPE[t.priority]}"></div>
@@ -988,7 +1053,7 @@ function buildCard(t){
         <button class="cbtn cbtn-del" onclick="deleteTask(${t.id})"><i class="fa-solid fa-trash-can"></i> Delete</button>
         <button class="cbtn cbtn-edit" onclick="openModal(${t.id})"><i class="fa-solid fa-pen"></i> Edit</button>
       </div>
-      <div class="cfa">${gcalBtn}</div>
+      <div class="cfa">${gcalBtns}</div>
     </div>`;
   return div;
 }
@@ -1097,3 +1162,30 @@ updateGCalStatus();
 </script>
 </body>
 </html>
+
+<!--
+═══════════════════════════════════════════════════════════════
+  TASK MANAGER PRO — CHANGE LOG
+═══════════════════════════════════════════════════════════════
+  v1.0 | Initial build — task cards, priorities, statuses,
+        countries, projects, members, header color config,
+        Quill rich text editor, filter/search, tab views.
+  v1.1 | Replaced old GCal tab-open system with OAuth token
+        connect flow (same system as Work Log project).
+        Added: openGCalModal, gcalAuthorise, gcalSaveToken,
+        gcalDisconnect, buildGCalEvent, pushToGCal, patchGCal,
+        deleteFromGCal, taskToEntry adapter, showToast.
+        GCal connect section added to Configure page.
+  v1.2 | Fixed: openGCalModal/closeGCalModal used classList
+        which was overridden by inline style — switched to
+        style.display toggle.
+  v1.3 | Fixed: pushToGCal called toast() which doesn't exist
+        in this file — replaced all with showToast(). Fixed
+        gcalEventId not persisting back to real task object.
+  v1.4 | Added pushWorkDaysToGCal — pushes each scheduled work
+        day as a separate Calendar event (timed if start/end
+        time set, all-day otherwise). Duplicate check per day.
+        Card now shows two GCal buttons: Deadline + Work Days.
+        Output renamed to TaskManagerPro.html.
+═══════════════════════════════════════════════════════════════
+-->
