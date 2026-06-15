@@ -677,9 +677,8 @@ function buildGCalEvent(entry){
 }
 
 async function pushToGCal(entry){
-  if(!gcalToken||!entry?.deadline){ toast('No deadline set.'); return; }
+  if(!gcalToken||!entry?.deadline){ showToast('No deadline set on this task.'); return; }
   try{
-    // ── Duplicate check ──────────────────────────────────────────────────
     const dayStart = entry.deadline+'T00:00:00Z';
     const dayEnd   = entry.deadline+'T23:59:59Z';
     const listRes  = await fetch(
@@ -688,32 +687,30 @@ async function pushToGCal(entry){
     );
     if(listRes.ok){
       const listData = await listRes.json();
-      const titleToCheck = (entry.type==='Task'?'✓ Task: ':'')+entry.name;
+      const titleToCheck = (entry.type==='Task'?'\u2713 Task: ':'')+entry.name;
       const dup = (listData.items||[]).find(ev=>ev.summary===titleToCheck);
       if(dup){
-        // Store the existing event ID so future edits can PATCH it
-        entry.gcalEventId = dup.id;
-        // (entry updated in place)
-        toast(`Already in Calendar on ${entry.deadline} — skipped.`);
+        const realTask = tasks.find(x=>x.id===entry.id);
+        if(realTask){ realTask.gcalEventId = dup.id; save(); }
+        showToast(`Already in Calendar on ${entry.deadline} — skipped.`);
         return;
       }
     }
-    // ── Create new event ─────────────────────────────────────────────────
     const res = await fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events',{
       method:'POST', headers:{Authorization:`Bearer ${gcalToken}`,'Content-Type':'application/json'},
       body:JSON.stringify(buildGCalEvent(entry))
     });
     if(res.ok){
       const created = await res.json();
-      entry.gcalEventId = created.id; // save for future delete/patch
-      // (entry updated in place)
+      const realTask = tasks.find(x=>x.id===entry.id);
+      if(realTask){ realTask.gcalEventId = created.id; save(); }
       const label = entry.type==='Task' ? 'Task' : 'Event';
-      toast(`"${entry.name}" added to Google Calendar as ${label}.`);
+      showToast(`"${entry.name}" added to Google Calendar as ${label}.`);
     } else {
       const err = await res.json();
-      toast('Calendar error — ' + (err.error?.message||'token may have expired.'));
+      showToast('Calendar error — ' + (err.error?.message||'token may have expired.'));
     }
-  }catch(e){ toast('Could not reach Google Calendar.'); }
+  }catch(e){ showToast('Could not reach Google Calendar.'); }
 }
 
 async function patchGCal(entry){
@@ -724,9 +721,9 @@ async function patchGCal(entry){
       {method:'PATCH', headers:{Authorization:`Bearer ${gcalToken}`,'Content-Type':'application/json'},
        body:JSON.stringify(buildGCalEvent(entry))}
     );
-    if(res.ok) toast(`Calendar event updated for "${entry.name}".`);
-    else toast('Calendar update failed — token may have expired.');
-  }catch{ toast('Could not reach Google Calendar.'); }
+    if(res.ok) showToast(`Calendar event updated for "${entry.name}".`);
+    else showToast('Calendar update failed — token may have expired.');
+  }catch{ showToast('Could not reach Google Calendar.'); }
 }
 
 async function deleteFromGCal(entry){
@@ -736,9 +733,9 @@ async function deleteFromGCal(entry){
       `https://www.googleapis.com/calendar/v3/calendars/primary/events/${entry.gcalEventId}`,
       {method:'DELETE', headers:{Authorization:`Bearer ${gcalToken}`}}
     );
-    if(res.ok||res.status===204) toast(`Calendar event removed for "${entry.name}".`);
-    else toast('Calendar delete failed — token may have expired. Remove manually.');
-  }catch{ toast('Could not reach Google Calendar.'); }
+    if(res.ok||res.status===204) showToast(`Calendar event removed for "${entry.name}".`);
+    else showToast('Calendar delete failed — token may have expired. Remove manually.');
+  }catch{ showToast('Could not reach Google Calendar.'); }
 }
 
 // ══════════ CONFIG ══════════
