@@ -687,7 +687,7 @@ async function pushToGCal(entry){
     );
     if(listRes.ok){
       const listData = await listRes.json();
-      const titleToCheck = (entry.type==='Task'?'\u2713 Task: ':'')+entry.name;
+      const titleToCheck = (entry.type==='Task'?'✓ Task: ':'')+entry.name;
       const dup = (listData.items||[]).find(ev=>ev.summary===titleToCheck);
       if(dup){
         const realTask = tasks.find(x=>x.id===entry.id);
@@ -1020,10 +1020,15 @@ function buildCard(t){
   const div=document.createElement('div');
   div.className=`task-card${done?' tc-done':''}${cancelled?' tc-cancel':''}`;
   const det=(t.detail&&t.detail.replace(/<[^>]*>/g,'').trim())?`<div class="card-detail-text">${t.detail}</div>`:'';
-  const gcalBtns = gcalToken ? `
-    <button class="cbtn cbtn-gcal" onclick="pushToGCal(taskToEntry(tasks.find(x=>x.id===${t.id})))"><i class="fa-brands fa-google"></i> Deadline</button>
-    ${t.workDays&&t.workDays.length ? `<button class="cbtn cbtn-gcal" onclick="pushWorkDaysToGCal(${t.id})"><i class="fa-regular fa-calendar-days"></i> Work Days (${t.workDays.length})</button>` : ''}
-  ` : `<button class="cbtn cbtn-gcal" onclick="switchPage('config');showToast('Connect Google Calendar in Configure first.')" style="opacity:.6;"><i class="fa-brands fa-google"></i> Add to Calendar</button>`;
+  let gcalBtns;
+  if(gcalToken){
+    const wdBtn = (t.workDays&&t.workDays.length)
+      ? '<button class="cbtn cbtn-gcal" onclick="pushWorkDaysToGCal('+t.id+')"><i class="fa-regular fa-calendar-days"></i> Work Days ('+t.workDays.length+')</button>'
+      : '';
+    gcalBtns = '<button class="cbtn cbtn-gcal" onclick="pushToGCal(taskToEntry(tasks.find(x=>x.id==='+t.id+')))"><i class="fa-brands fa-google"></i> Deadline</button>' + wdBtn;
+  } else {
+    gcalBtns = '<button class="cbtn cbtn-gcal" onclick="switchPage('config');showToast('Connect Google Calendar in Configure first.')" style="opacity:.6;"><i class="fa-brands fa-google"></i> Add to Calendar</button>';
+  }
   div.innerHTML=`
     <div class="card-stripe-body">
       <div class="priority-stripe" style="background:${PRI_STRIPE[t.priority]}"></div>
@@ -1183,6 +1188,13 @@ updateGCalStatus();
         in this file — replaced all with showToast(). Fixed
         gcalEventId not persisting back to real task object.
   v1.4 | Added pushWorkDaysToGCal — pushes each scheduled work
+        day as a separate Calendar event (timed if start/end
+        time set, all-day otherwise). Duplicate check per day.
+        Card now shows two GCal buttons: Deadline + Work Days.
+        Output renamed to TaskManagerPro.html.
+  v1.5 | Fixed nested template literal bug causing Work Days
+        button to not render. Fixed duplicate check using
+        unicode escape vs literal ✓ mismatch. — pushes each scheduled work
         day as a separate Calendar event (timed if start/end
         time set, all-day otherwise). Duplicate check per day.
         Card now shows two GCal buttons: Deadline + Work Days.
